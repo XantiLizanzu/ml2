@@ -27,4 +27,6 @@ Run the `simultaneous_training.py` file.
 
 # Edit code
 
-Create a branch from `main` named for what you are doing (e.g. `add-ltsm`) and when you are done create a pull request.
+Create a branch from `main` named for what you are doing (e.g. `add-ltsm`) and when you are done and committed all your code create a pull request through GitHub:
+
+![Pull request GitHub screenshot](docs/pull_request_screenshot.png)
