@@ -9,15 +9,18 @@ from rlcard.envs.registration import register
 import numpy as np
 import collections
 
+from dotenv import load_dotenv
+
 # Import custom environment
-from BNAIC_paper_files.custom_leduc_rlcard.leducholdem import LeducholdemEnv
+from custom_leduc_rlcard.leducholdem import LeducholdemEnv
 
 # Register the custom environment
 register(env_id="custom-leduc-holdem",
-         entry_point="BNAIC_paper_files.custom_leduc_rlcard.leducholdem:LeducholdemEnv")
+         entry_point="custom_leduc_rlcard.leducholdem:LeducholdemEnv")
 
 # === Config and Paths ===
-SAVE_DIR = r'C:\Users\zaket\PycharmProjects\Thesis\BNAIC_paper_results\simultaneous_Training_100K'
+load_dotenv()
+SAVE_DIR = os.environ.get('SAVE_DIR')
 os.makedirs(SAVE_DIR, exist_ok=True)
 SAVE_DQN_PATH = os.path.join(SAVE_DIR, 'dqn_simultaneous_100K.pt')
 SAVE_CFR_PATH = os.path.join(SAVE_DIR, 'cfr_simultaneous_100K.pkl')

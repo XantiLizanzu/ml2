@@ -1,0 +1,4 @@
+rlcard 
+dotenv 
+wandb
+torch
