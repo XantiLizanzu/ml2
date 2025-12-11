@@ -1,3 +1,5 @@
+![A straight flush at the poker table with some chips in the background](docs/poker.jpg)
+
 # Installation
 
 To install the project, paste the following commands:
