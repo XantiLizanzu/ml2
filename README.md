@@ -24,3 +24,7 @@ And edit `SAVE_DIR` to match the directory where you want to save the model.
 # Run
 
 Run the `simultaneous_training.py` file.
+
+# Edit code
+
+Create a branch from `main` named for what you are doing (e.g. `add-ltsm`) and when you are done create a pull request.
