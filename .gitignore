@@ -1,2 +1,4 @@
-./venv
+venv
 .env
+custom_leduc_rlcard/__pycache__
+wandb
