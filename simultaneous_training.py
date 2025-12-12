@@ -169,6 +169,7 @@ def train():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # use the custom DQN agent so that we change it working
     dqn_agent = CustomDQNAgent(
         num_actions=env.num_actions,
         state_shape=env.state_shape[0],
