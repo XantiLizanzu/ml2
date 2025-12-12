@@ -32,7 +32,7 @@ config = {
     "train_episodes": 100_000,
     "eval_interval": 5_000,
     "eval_games": 2_000,
-    "mlp_layers": [256, 256],
+    "mlp_layers": [256, 256],  # two hidden layers of 256 units
     "learning_rate": 0.00005,
     "batch_size": 64,
     "epsilon_decay_steps": 50_000,

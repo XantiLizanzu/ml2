@@ -465,14 +465,14 @@ class EstimatorNetwork(nn.Module):
         self.mlp_layers = mlp_layers
 
         # build the Q network
-        layer_dims = [np.prod(self.state_shape)] + self.mlp_layers
-        fc = [nn.Flatten()]
-        fc.append(nn.BatchNorm1d(layer_dims[0]))
+        layer_dims = [np.prod(self.state_shape)] + self.mlp_layers  # resulting list where first item is a layer with the input (state)
+        fc = [nn.Flatten()]  # initialization
+        fc.append(nn.BatchNorm1d(layer_dims[0]))  # batch normalization
         for i in range(len(layer_dims)-1):
             fc.append(nn.Linear(layer_dims[i], layer_dims[i+1], bias=True))
-            fc.append(nn.Tanh())
-        fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))
-        self.fc_layers = nn.Sequential(*fc)
+            fc.append(nn.Tanh())  # add tanh activation functions
+        fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))  # to output layer
+        self.fc_layers = nn.Sequential(*fc)  # initialize module state
 
     def forward(self, s):
         ''' Predict action values
