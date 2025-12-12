@@ -12,6 +12,7 @@ import collections
 from dotenv import load_dotenv
 
 # Import custom environment
+from custom_dqn_agent import CustomDQNAgent
 from custom_leduc_rlcard.leducholdem import LeducholdemEnv
 
 # Register the custom environment
@@ -168,7 +169,7 @@ def train():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dqn_agent = DQNAgent(
+    dqn_agent = CustomDQNAgent(
         num_actions=env.num_actions,
         state_shape=env.state_shape[0],
         mlp_layers=config['mlp_layers'],
