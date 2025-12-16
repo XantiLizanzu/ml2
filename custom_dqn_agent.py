@@ -121,6 +121,16 @@ class CustomDQNAgent(object):
         self.save_path = save_path
         self.save_every = save_every
 
+        # Initialize the hidden state here
+
+        h0 = torch.randn(1, mlp_layers[0])
+        c0 = torch.randn(1, mlp_layers[0])
+        self.state = (h0.to(self.device), c0.to(self.device))
+
+    def reset_state(self):
+        self.hn.detach()
+        self.cn.detach()
+
     def feed(self, ts):
         ''' Store data in to replay buffer and train the agent. There are two stages.
             In stage 1, populate the memory without training
@@ -183,14 +193,15 @@ class CustomDQNAgent(object):
         Returns:
             q_values (numpy.array): a 1-d array where each entry represents a Q value
         '''
-        
-        q_values = self.q_estimator.predict_nograd(np.expand_dims(state['obs'], 0))[0]
+
+        q_values = self.q_estimator.predict_nograd(np.expand_dims(state['obs'], 0), self.state)[0]
         masked_q_values = -np.inf * np.ones(self.num_actions, dtype=float)
         legal_actions = list(state['legal_actions'].keys())
         masked_q_values[legal_actions] = q_values[legal_actions]
 
         return masked_q_values
 
+    # called every episode
     def train(self):
         ''' Train the network
 
@@ -217,7 +228,8 @@ class CustomDQNAgent(object):
         # Perform gradient descent update
         state_batch = np.array(state_batch)
 
-        loss = self.q_estimator.update(state_batch, action_batch, target_batch)
+        loss, new_state = self.q_estimator.update(state_batch, action_batch, target_batch, self.state)
+        self.state = new_state
         print('\rINFO - Step {}, rl-loss: {}'.format(self.total_t, loss), end='')
 
         # Update the target estimator
@@ -360,24 +372,26 @@ class Estimator(object):
         # set up optimizer
         self.optimizer =  torch.optim.Adam(self.qnet.parameters(), lr=self.learning_rate)
 
-    def predict_nograd(self, s):
+    def predict_nograd(self, s, state):
         ''' Predicts action values, but prediction is not included
             in the computation graph.  It is used to predict optimal next
             actions in the Double-DQN algorithm.
 
         Args:
           s (np.ndarray): (batch, state_len)
+            state (tuple): initial hidden and cell states
 
         Returns:
-          np.ndarray of shape (batch_size, NUM_VALID_ACTIONS) containing the estimated
-          action values.
+            q_as (np.ndarray): (batch, num_actions) predicted action values
+            new_state (tuple): new hidden and cell states
         '''
         with torch.no_grad():
             s = torch.from_numpy(s).float().to(self.device)
-            q_as = self.qnet(s).cpu().numpy()
-        return q_as
+            q_as, new_state = self.qnet(s, state)
+            q_as = q_as.cpu().numpy()
+        return q_as, new_state
 
-    def update(self, s, a, y):
+    def update(self, s, a, y, state):
         ''' Updates the estimator towards the given targets.
             In this case y is the target-network estimated
             value of the Q-network optimal actions, which
@@ -400,7 +414,7 @@ class Estimator(object):
         y = torch.from_numpy(y).float().to(self.device)
 
         # (batch, state_shape) -> (batch, num_actions)
-        q_as = self.qnet(s)
+        q_as, new_state = self.qnet(s, state)
 
         # (batch, num_actions) -> (batch, )
         Q = torch.gather(q_as, dim=-1, index=a.unsqueeze(-1)).squeeze(-1)
@@ -413,7 +427,7 @@ class Estimator(object):
 
         self.qnet.eval()
 
-        return batch_loss
+        return batch_loss, new_state
     
     def checkpoint_attributes(self):
         ''' Return the attributes needed to restore the model from a checkpoint
@@ -465,22 +479,27 @@ class EstimatorNetwork(nn.Module):
         self.mlp_layers = mlp_layers
 
         # build the Q network
-        layer_dims = [np.prod(self.state_shape)] + self.mlp_layers  # resulting list where first item is a layer with the input (state)
-        fc = [nn.Flatten()]  # initialization
-        fc.append(nn.BatchNorm1d(layer_dims[0]))  # batch normalization
-        for i in range(len(layer_dims)-1):
+        layer_dims = [np.prod(self.state_shape)] + self.mlp_layers
+        fc = [nn.Flatten(), nn.LSTM(layer_dims[0], layer_dims[1], batch_first=True)]
+        for i in range(1, len(layer_dims)-1):
             fc.append(nn.Linear(layer_dims[i], layer_dims[i+1], bias=True))
             fc.append(nn.Tanh())  # add tanh activation functions
         fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))  # to output layer
         self.fc_layers = nn.Sequential(*fc)  # initialize module state
 
-    def forward(self, s):
-        ''' Predict action values
+    def forward(self, s, state):
+        ''' Predict action values and return new hidden and cell states
 
         Args:
             s  (Tensor): (batch, state_shape)
+            state (tuple): initial hidden and cell states
+
+        Returns:
+            output (Tensor): predicted action values
+            new_state (tuple): new hidden and cell states
         '''
-        return self.fc_layers(s)
+        output, new_state = self.fc_layers(s, state)
+        return output, new_state
 
 class Memory(object):
     ''' Memory for saving transitions
