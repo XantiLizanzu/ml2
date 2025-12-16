@@ -34,6 +34,8 @@ from copy import deepcopy
 
 Transition = namedtuple('Transition', ['state', 'action', 'reward', 'next_state', 'done', 'legal_actions'])
 
+torch.autograd.set_detect_anomaly(True)
+
 
 class CustomDQNAgent(object):
     '''
@@ -122,14 +124,14 @@ class CustomDQNAgent(object):
         self.save_every = save_every
 
         # Initialize the hidden state here
-
-        h0 = torch.randn(1, mlp_layers[0])
-        c0 = torch.randn(1, mlp_layers[0])
-        self.state = (h0.to(self.device), c0.to(self.device))
+        # LSTM state will be created on demand in the network forward pass to match batch size.
+        # Keep agent-level state as None to be initialized lazily.
+        self.state = None
 
     def reset_state(self):
-        self.hn.detach()
-        self.cn.detach()
+        if self.state is None:
+            return
+        self.state = tuple(each.detach().to(self.device) for each in self.state)
 
     def feed(self, ts):
         ''' Store data in to replay buffer and train the agent. There are two stages.
@@ -194,11 +196,13 @@ class CustomDQNAgent(object):
             q_values (numpy.array): a 1-d array where each entry represents a Q value
         '''
 
-        q_values = self.q_estimator.predict_nograd(np.expand_dims(state['obs'], 0), self.state)[0]
+        q_as, new_state = self.q_estimator.predict_nograd(np.expand_dims(state['obs'], 0), self.state)
         masked_q_values = -np.inf * np.ones(self.num_actions, dtype=float)
         legal_actions = list(state['legal_actions'].keys())
+        q_values = q_as[0]
         masked_q_values[legal_actions] = q_values[legal_actions]
 
+        self.state = new_state
         return masked_q_values
 
     # called every episode
@@ -211,7 +215,8 @@ class CustomDQNAgent(object):
         state_batch, action_batch, reward_batch, next_state_batch, done_batch, legal_actions_batch = self.memory.sample()
 
         # Calculate best next actions using Q-network (Double DQN)
-        q_values_next = self.q_estimator.predict_nograd(next_state_batch)
+        q_as_next = self.q_estimator.predict_nograd(next_state_batch, self.state)
+        q_values_next = q_as_next[0]
         legal_actions = []
         for b in range(self.batch_size):
             legal_actions.extend([i + b * self.num_actions for i in legal_actions_batch[b]])
@@ -221,7 +226,8 @@ class CustomDQNAgent(object):
         best_actions = np.argmax(masked_q_values, axis=1)
 
         # Evaluate best next actions using Target-network (Double DQN)
-        q_values_next_target = self.target_estimator.predict_nograd(next_state_batch)
+        q_as_next_target = self.target_estimator.predict_nograd(next_state_batch, self.state)
+        q_values_next_target = q_as_next_target[0]
         target_batch = reward_batch + np.invert(done_batch).astype(np.float32) * \
             self.discount_factor * q_values_next_target[np.arange(self.batch_size), best_actions]
 
@@ -376,35 +382,24 @@ class Estimator(object):
         ''' Predicts action values, but prediction is not included
             in the computation graph.  It is used to predict optimal next
             actions in the Double-DQN algorithm.
-
-        Args:
-          s (np.ndarray): (batch, state_len)
-            state (tuple): initial hidden and cell states
-
-        Returns:
-            q_as (np.ndarray): (batch, num_actions) predicted action values
-            new_state (tuple): new hidden and cell states
         '''
         with torch.no_grad():
             s = torch.from_numpy(s).float().to(self.device)
+            # Ensure state batch matches s batch size
+            if state is not None:
+                h, c = state
+                h = h.to(self.device)
+                c = c.to(self.device)
+                if h.size(1) != s.size(0):
+                    h = h.repeat(1, s.size(0), 1)
+                    c = c.repeat(1, s.size(0), 1)
+                state = (h, c)
             q_as, new_state = self.qnet(s, state)
             q_as = q_as.cpu().numpy()
         return q_as, new_state
 
     def update(self, s, a, y, state):
-        ''' Updates the estimator towards the given targets.
-            In this case y is the target-network estimated
-            value of the Q-network optimal actions, which
-            is labeled y in Algorithm 1 of Minh et al. (2015)
-
-        Args:
-          s (np.ndarray): (batch, state_shape) state representation
-          a (np.ndarray): (batch,) integer sampled actions
-          y (np.ndarray): (batch,) value of optimal actions according to Q-target
-
-        Returns:
-          The calculated loss on the batch.
-        '''
+        ''' Updates the estimator towards the given targets.'''
         self.optimizer.zero_grad()
 
         self.qnet.train()
@@ -412,6 +407,16 @@ class Estimator(object):
         s = torch.from_numpy(s).float().to(self.device)
         a = torch.from_numpy(a).long().to(self.device)
         y = torch.from_numpy(y).float().to(self.device)
+
+        # align state batch size with s
+        if state is not None:
+            h, c = state
+            h = h.to(self.device)
+            c = c.to(self.device)
+            if h.size(1) != s.size(0):
+                h = h.repeat(1, s.size(0), 1)
+                c = c.repeat(1, s.size(0), 1)
+            state = (h, c)
 
         # (batch, state_shape) -> (batch, num_actions)
         q_as, new_state = self.qnet(s, state)
@@ -421,7 +426,7 @@ class Estimator(object):
 
         # update model
         batch_loss = self.mse_loss(Q, y)
-        batch_loss.backward()
+        batch_loss.backward(retain_graph=True)  # 
         self.optimizer.step()
         batch_loss = batch_loss.item()
 
@@ -480,12 +485,20 @@ class EstimatorNetwork(nn.Module):
 
         # build the Q network
         layer_dims = [np.prod(self.state_shape)] + self.mlp_layers
-        fc = [nn.Flatten(), nn.LSTM(layer_dims[0], layer_dims[1], batch_first=True)]
+        
+        # Flatten layer for input
+        self.flatten = nn.Flatten()
+        
+        # LSTM layer
+        self.lstm = nn.LSTM(layer_dims[0], layer_dims[1], batch_first=True)
+        
+        # Fully connected layers after LSTM
+        fc = []
         for i in range(1, len(layer_dims)-1):
             fc.append(nn.Linear(layer_dims[i], layer_dims[i+1], bias=True))
             fc.append(nn.Tanh())  # add tanh activation functions
         fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))  # to output layer
-        self.fc_layers = nn.Sequential(*fc)  # initialize module state
+        self.fc_layers = nn.Sequential(*fc)
 
     def forward(self, s, state):
         ''' Predict action values and return new hidden and cell states
@@ -498,7 +511,24 @@ class EstimatorNetwork(nn.Module):
             output (Tensor): predicted action values
             new_state (tuple): new hidden and cell states
         '''
-        output, new_state = self.fc_layers(s, state)
+        # Flatten input
+        x = self.flatten(s)
+        
+        # Add sequence dimension for LSTM (batch_first=True expects [batch, seq_len, features])
+        x = x.unsqueeze(1)
+        
+        if state is None:
+            # Initialize hidden and cell states to zeros if not provided
+            h_0 = torch.randn(1, x.size(0), self.lstm.hidden_size).to(x.device)
+            c_0 = torch.randn(1, x.size(0), self.lstm.hidden_size).to(x.device)
+            state = (h_0, c_0)
+
+        lstm_out, new_state = self.lstm(x, state)
+        
+        # Remove sequence dimension and pass through FC layers
+        x = lstm_out.squeeze(1)
+        output = self.fc_layers(x)
+        
         return output, new_state
 
 class Memory(object):

@@ -195,6 +195,7 @@ def train():
     env.set_agents([dqn_agent, CFRWrapper(cfr_agent)])
 
     for episode in range(config['train_episodes']):
+            print(episode)
             # CFR training iterations
             for _ in range(config['iterations_per_episode']):
                 env.reset()
