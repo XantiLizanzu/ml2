@@ -213,6 +213,12 @@ def train():
                     "episode": episode
                 })
 
+            # Reset the hidden and cell state every n-th episode
+            n = 10
+
+            if episode % n == 0 and episode != 0:
+                dqn_agent.reset_state()
+
             # DQN training from actual gameplay
             trajectories, payoffs = env.run(is_training=True)
             trajectories = reorganize(trajectories, payoffs)

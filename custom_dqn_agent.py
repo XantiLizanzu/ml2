@@ -110,9 +110,9 @@ class CustomDQNAgent(object):
 
         # Create estimators
         self.q_estimator = Estimator(num_actions=num_actions, learning_rate=learning_rate, state_shape=state_shape, \
-            mlp_layers=mlp_layers, device=self.device)
+            mlp_layers=mlp_layers, device=self.device, batch_size=batch_size)
         self.target_estimator = Estimator(num_actions=num_actions, learning_rate=learning_rate, state_shape=state_shape, \
-            mlp_layers=mlp_layers, device=self.device)
+            mlp_layers=mlp_layers, device=self.device, batch_size=batch_size)
 
         # Create replay memory
         self.memory = Memory(replay_memory_size, batch_size)
@@ -120,6 +120,10 @@ class CustomDQNAgent(object):
         # Checkpoint saving parameters
         self.save_path = save_path
         self.save_every = save_every
+
+    def reset_state(self):
+        self.q_estimator.qnet.reset_state()
+        self.target_estimator.qnet.reset_state()
 
     def feed(self, ts):
         ''' Store data in to replay buffer and train the agent. There are two stages.
@@ -222,7 +226,8 @@ class CustomDQNAgent(object):
 
         # Update the target estimator
         if self.train_t % self.update_target_estimator_every == 0:
-            self.target_estimator = deepcopy(self.q_estimator)
+            # Reconstruct a fresh Estimator from the q_estimator checkpoint to avoid deepcopy on tensors
+            self.target_estimator = Estimator.from_checkpoint(self.q_estimator.checkpoint_attributes())
             print("\nINFO - Copied model parameters to target network.")
 
         self.train_t += 1
@@ -305,7 +310,8 @@ class CustomDQNAgent(object):
         agent_instance.train_t = checkpoint['train_t']
         
         agent_instance.q_estimator = Estimator.from_checkpoint(checkpoint['q_estimator'])
-        agent_instance.target_estimator = deepcopy(agent_instance.q_estimator)
+        # Reconstruct a fresh Estimator for the target network instead of deepcopy (avoids tensor deepcopy errors)
+        agent_instance.target_estimator = Estimator.from_checkpoint(agent_instance.q_estimator.checkpoint_attributes())
         agent_instance.memory = Memory.from_checkpoint(checkpoint['memory'])
         
         
@@ -328,7 +334,7 @@ class Estimator(object):
     This network is used for both the Q-Network and the Target Network.
     '''
 
-    def __init__(self, num_actions=2, learning_rate=0.001, state_shape=None, mlp_layers=None, device=None):
+    def __init__(self, num_actions=2, learning_rate=0.001, state_shape=None, mlp_layers=None, device=None, batch_size=1):
         ''' Initilalize an Estimator object.
 
         Args:
@@ -344,7 +350,7 @@ class Estimator(object):
         self.device = device
 
         # set up Q model and place it in eval mode
-        qnet = EstimatorNetwork(num_actions, state_shape, mlp_layers)
+        qnet = EstimatorNetwork(num_actions, state_shape, mlp_layers, batch_size, device)
         qnet = qnet.to(self.device)
         self.qnet = qnet
         self.qnet.eval()
@@ -450,7 +456,7 @@ class EstimatorNetwork(nn.Module):
         It is just a series of tanh layers. All in/out are torch.tensor
     '''
 
-    def __init__(self, num_actions=2, state_shape=None, mlp_layers=None):
+    def __init__(self, num_actions=2, state_shape=None, mlp_layers=None, batch_size=1, device=None):
         ''' Initialize the Q network
 
         Args:
@@ -465,22 +471,51 @@ class EstimatorNetwork(nn.Module):
         self.mlp_layers = mlp_layers
 
         # build the Q network
-        layer_dims = [np.prod(self.state_shape)] + self.mlp_layers  # resulting list where first item is a layer with the input (state)
-        fc = [nn.Flatten()]  # initialization
-        fc.append(nn.BatchNorm1d(layer_dims[0]))  # batch normalization
-        for i in range(len(layer_dims)-1):
+        layer_dims = [np.prod(self.state_shape)] + self.mlp_layers
+
+        h_0 = torch.randn(1, batch_size, layer_dims[1]).to(device)
+        c_0 = torch.randn(1, batch_size, layer_dims[1]).to(device)
+        self.state = (h_0, c_0)
+
+        # Flatten layer for input
+        self.flatten = nn.Flatten()
+
+        # LSTM layer
+        self.lstm = nn.LSTM(layer_dims[0], layer_dims[1], batch_first=True)
+
+        # Fully connected layers after LSTM
+        fc = []
+        for i in range(1, len(layer_dims)-1):
             fc.append(nn.Linear(layer_dims[i], layer_dims[i+1], bias=True))
             fc.append(nn.Tanh())  # add tanh activation functions
         fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))  # to output layer
         self.fc_layers = nn.Sequential(*fc)  # initialize module state
 
-    def forward(self, s):
-        ''' Predict action values
+    def reset_state(self):
+        for state in self.state:
+            state.detach_()
 
-        Args:
-            s  (Tensor): (batch, state_shape)
-        '''
-        return self.fc_layers(s)
+    def forward(self, s):
+        # Flatten input
+        x = self.flatten(s)
+
+        # Add sequence dimension for LSTM (batch_first=True expects [batch, seq_len, features])
+        x = x.unsqueeze(1)
+
+        if x.size(0) != self.state[0].size(1):
+            h_0 = torch.randn(1, x.size(0), self.state[0].size(2)).to(x.device)
+            c_0 = torch.randn(1, x.size(0), self.state[0].size(2)).to(x.device)
+            self.state = (h_0, c_0)
+
+        lstm_out, new_state = self.lstm(x, self.state)
+
+        self.state = new_state
+
+        # Remove sequence dimension and pass through FC layers
+        x = lstm_out.squeeze(1)
+        output = self.fc_layers(x)
+
+        return output
 
 class Memory(object):
     ''' Memory for saving transitions
