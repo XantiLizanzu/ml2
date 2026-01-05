@@ -469,42 +469,56 @@ class EstimatorNetwork(nn.Module):
         self.num_actions = num_actions
         self.state_shape = state_shape
         self.mlp_layers = mlp_layers
+        self.batch_size = batch_size
 
         # build the Q network
         layer_dims = [np.prod(self.state_shape)] + self.mlp_layers
+        self.layer_dims = layer_dims
+        fc = [nn.Flatten()]
+        fc.append(nn.BatchNorm1d(layer_dims[0]))
+        fc.append(nn.Linear(layer_dims[0], layer_dims[1], bias=True))
+        fc.append(nn.Tanh())
+        
+        # fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))
+        self.fc_layers = nn.Sequential(*fc)
 
-        h_0 = torch.randn(1, batch_size, layer_dims[1]).to(device)
-        c_0 = torch.randn(1, batch_size, layer_dims[1]).to(device)
+        h_0 = torch.zeros(1, batch_size, layer_dims[2]).to(device)
+        c_0 = torch.zeros(1, batch_size, layer_dims[2]).to(device)
         self.state = (h_0, c_0)
 
-        # Flatten layer for input
-        self.flatten = nn.Flatten()
-
         # LSTM layer
-        self.lstm = nn.LSTM(layer_dims[0], layer_dims[1], batch_first=True)
+        self.lstm = nn.LSTM(layer_dims[1], layer_dims[2], batch_first=True)
 
+        last_connected_layer = nn.Linear(layer_dims[2], self.num_actions, bias=True)
+        self.last_fc = nn.Sequential(last_connected_layer)
+        # Flatten layer for input
+        # self.flatten = nn.Flatten()
+        
         # Fully connected layers after LSTM
-        fc = []
-        for i in range(1, len(layer_dims)-1):
-            fc.append(nn.Linear(layer_dims[i], layer_dims[i+1], bias=True))
-            fc.append(nn.Tanh())  # add tanh activation functions
-        fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))  # to output layer
-        self.fc_layers = nn.Sequential(*fc)  # initialize module state
+        # fc = []
+        # for i in range(1, len(layer_dims)-1):
+        #     fc.append(nn.Linear(layer_dims[i], layer_dims[i+1], bias=True))
+        #     fc.append(nn.Tanh())  # add tanh activation functions
+        # fc.append(nn.Linear(layer_dims[-1], self.num_actions, bias=True))  # to output layer
+        # self.fc_layers = nn.Sequential(*fc)  # initialize module state
 
     def reset_state(self):
-        for state in self.state:
-            state.detach_()
+        h_0 = torch.zeros(1, self.batch_size, self.layer_dims[2])
+        c_0 = torch.zeros(1, self.batch_size, self.layer_dims[2])
+        self.state = (h_0, c_0)
 
     def forward(self, s):
+        x = self.fc_layers(s)
+
         # Flatten input
-        x = self.flatten(s)
+        # x = self.flatten(s)
 
         # Add sequence dimension for LSTM (batch_first=True expects [batch, seq_len, features])
         x = x.unsqueeze(1)
 
         if x.size(0) != self.state[0].size(1):
-            h_0 = torch.randn(1, x.size(0), self.state[0].size(2)).to(x.device)
-            c_0 = torch.randn(1, x.size(0), self.state[0].size(2)).to(x.device)
+            h_0 = torch.zeros(1, x.size(0), self.state[0].size(2)).to(x.device)
+            c_0 = torch.zeros(1, x.size(0), self.state[0].size(2)).to(x.device)
             self.state = (h_0, c_0)
 
         lstm_out, new_state = self.lstm(x, self.state)
@@ -513,7 +527,7 @@ class EstimatorNetwork(nn.Module):
 
         # Remove sequence dimension and pass through FC layers
         x = lstm_out.squeeze(1)
-        output = self.fc_layers(x)
+        output = self.last_fc(x)
 
         return output
 
