@@ -2,3 +2,4 @@ rlcard
 dotenv 
 wandb
 torch
+matplotlib

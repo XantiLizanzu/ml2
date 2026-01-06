@@ -6,19 +6,20 @@ import numpy as np
 from rlcard.agents import DQNAgent
 from rlcard.utils import set_seed
 from rlcard.envs.registration import register
+from custom_dqn_agent import CustomDQNAgent
 
 # Import custom environment
-from BNAIC_paper_files.custom_leduc_rlcard.leducholdem import LeducholdemEnv
+from custom_leduc_rlcard.leducholdem import LeducholdemEnv
 
 # Register the custom environment
 register(env_id="custom-leduc-holdem",
-         entry_point="BNAIC_paper_files.custom_leduc_rlcard.leducholdem:LeducholdemEnv")
+         entry_point="custom_leduc_rlcard.leducholdem:LeducholdemEnv")
 
 NUM_GAMES = 100_000
 SEED = 42
-SAVE_DIR = r'C:\Users\zaket\PycharmProjects\Thesis\BNAIC_paper_results\simultaneous_Evaluation_100K'
-CFR_MODEL_PATH = r"C:\Users\zaket\PycharmProjects\Thesis\BNAIC_paper_results\simultaneous_Training_100K\cfr_simultaneous_100K.pkl"
-DQN_MODEL_PATH = r"C:\Users\zaket\PycharmProjects\Thesis\BNAIC_paper_results\simultaneous_Training_100K\dqn_simultaneous_100K.pt"
+SAVE_DIR = r'C:\Users\Xanti Lizanzu\Documents\Studie\ML2\ml2\evaluation_100k'
+CFR_MODEL_PATH = r"C:\Users\Xanti Lizanzu\Documents\Studie\ML2\ml2\cfr_simultaneous_100k.pkl"
+DQN_MODEL_PATH = r"C:\Users\Xanti Lizanzu\Documents\Studie\ML2\ml2\dqn_simultaneous_100k.pt"
 LOG_ALL_PATH = os.path.join(SAVE_DIR, 'evaluation_game_logs_all_100K.jsonl')
 LOG_CFR_PATH = os.path.join(SAVE_DIR, 'evaluation_game_logs_cfr_pov_100K.jsonl')
 LOG_DQN_PATH = os.path.join(SAVE_DIR, 'evaluation_game_logs_dqn_pov_100K.jsonl')

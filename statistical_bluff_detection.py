@@ -5,6 +5,7 @@ import pickle
 import matplotlib.pyplot as plt
 import wandb
 import os
+import random
 SEED = 42
 np.random.seed(SEED)
 random.seed(SEED)
@@ -721,7 +722,7 @@ def run_statistical_analysis_both_players(log_path):
 
 # Main execution
 if __name__ == "__main__":
-    log_path = r'C:\Users\zaket\PycharmProjects\Thesis\BNAIC_paper_results\simultaneous_Evaluation_100K\evaluation_game_logs_all_100K.jsonl'
+    log_path = r'C:\Users\Xanti Lizanzu\Documents\Studie\ML2\ml2\evaluation_100k\evaluation_game_logs_all_100K.jsonl'
 
     dqn_results, cfr_results = run_statistical_analysis_both_players(log_path)
 
