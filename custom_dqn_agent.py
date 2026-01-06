@@ -503,8 +503,9 @@ class EstimatorNetwork(nn.Module):
         # self.fc_layers = nn.Sequential(*fc)  # initialize module state
 
     def reset_state(self):
-        h_0 = torch.zeros(1, self.batch_size, self.layer_dims[2])
-        c_0 = torch.zeros(1, self.batch_size, self.layer_dims[2])
+        device = self.state[0].device
+        h_0 = torch.zeros(1, self.batch_size, self.layer_dims[2], device=device)
+        c_0 = torch.zeros(1, self.batch_size, self.layer_dims[2], device=device)
         self.state = (h_0, c_0)
 
     def forward(self, s):
